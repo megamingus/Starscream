@@ -747,6 +747,32 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         guard let proxySettings: NSDictionary = CFNetworkCopySystemProxySettings()?.takeRetainedValue()
             else { return }
         
+        if let autoProxyUrl = proxySettings[(kCFNetworkProxiesProxyAutoConfigURLString as NSString)] as? String {
+            if let pacURL = NSURL(string: autoProxyUrl) as? URL {
+                
+                let request = URLRequest(url:pacURL)
+                let session = URLSession.shared
+                let task = session.dataTask(with: request) {[weak self] (data, response, error) in
+                    if error == nil && data != nil {
+                        if let script = String(data: data!, encoding: String.Encoding.utf8) {
+                            if let settings = self?.fetchProxySettingFromPACScript(script) {
+                                if let proxyType = settings[(kCFProxyTypeKey as NSString)] as? NSString {
+                                    self?.stream.setupSocksProxy(proxyType, settings: settings)
+                                    self?.httpProxyHost = settings[(kCFProxyHostNameKey as NSString)] as? String
+                                    self?.httpProxyPort = settings[(kCFProxyPortNumberKey as NSString)] as! NSInteger
+                                    if let proxyHost = self?.httpProxyHost, let proxyPort = self?.httpProxyPort {
+                                        self?.startProxyConnection(proxyHost, proxyPort)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                task.resume()
+            }
+        }
+        
+        
         let proxies: NSArray = CFNetworkCopyProxiesForURL(url as CFURL, proxySettings).takeRetainedValue()
         guard proxies.count > 0 else { return }
         
@@ -795,6 +821,10 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
                     }
                 }
             }
+            
+            //
+            
+            
             if proxyType == kCFProxyTypeHTTP || proxyType == kCFProxyTypeHTTPS {
                 // HTTP/HTTPS proxy
                 httpProxyHost = settings[(kCFProxyHostNameKey as NSString)] as? String
