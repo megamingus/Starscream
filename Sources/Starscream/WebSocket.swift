@@ -753,77 +753,37 @@ open class WebSocket : NSObject, StreamDelegate, WebSocketClient, WSStreamDelega
         
         let settings = proxies[0] as! NSDictionary
         
+        //try agn mingo
         if let proxyType = settings[(kCFProxyTypeKey as NSString)] as? NSString {
-            if proxyType == (kCFProxyTypeAutoConfigurationURL as NSString)  {
-                // AutoConfig proxy
-                if let pacURL = settings[(kCFProxyAutoConfigurationURLKey as NSString)] as? URL {
-                    if pacURL.isFileURL {
-                        do {
-                            let script = try String(contentsOf:pacURL)
-                            if let settings = self.fetchProxySettingFromPACScript(script) {
-                                if let proxyType = settings[(kCFProxyTypeKey as NSString)] as? NSString {
-                                    stream.setupSocksProxy(proxyType, settings: settings)
-                                    self.httpProxyHost = settings[(kCFProxyHostNameKey as NSString)] as? String
-                                    self.httpProxyPort = settings[(kCFProxyPortNumberKey as NSString)] as! NSInteger
-                                    if let proxyHost = httpProxyHost {
-                                        startProxyConnection(proxyHost, httpProxyPort)
-                                    }
-                                }
-                            }
-                        } catch {
-                            // TODO: error handling...
-                        }
-                    } else {
-                        let request = URLRequest(url:pacURL)
-                        let session = URLSession.shared
-                        let task = session.dataTask(with: request) {[weak self] (data, response, error) in
-                            if error == nil && data != nil {
-                                if let script = String(data: data!, encoding: String.Encoding.utf8) {
-                                    if let settings = self?.fetchProxySettingFromPACScript(script) {
-                                        if let proxyType = settings[(kCFProxyTypeKey as NSString)] as? NSString {
-                                            self?.stream.setupSocksProxy(proxyType, settings: settings)
-                                            self?.httpProxyHost = settings[(kCFProxyHostNameKey as NSString)] as? String
-                                            self?.httpProxyPort = settings[(kCFProxyPortNumberKey as NSString)] as! NSInteger
-                                            if let proxyHost = self?.httpProxyHost, let proxyPort = self?.httpProxyPort {
-                                                self?.startProxyConnection(proxyHost, proxyPort)
-                                            }
-                                        }
-                                    }
+            if proxyType == kCFProxyTypeAutoConfigurationURL  {
+                if let pacURLString = proxySettings[(kCFNetworkProxiesProxyAutoConfigURLString as NSString)] as? NSString,
+                    let pacURL = URL(string: pacURLString as String) {
+                    
+                    let pacresolver = PACResolver(scriptURL: pacURL);
+                    
+                    pacresolver.resolve(targetURL: url, callback: { result in
+                        switch result {
+                        case .error: break
+                        case .proxies(let dictionary):
+                            if let pacProxySettings = dictionary as? [[CFString: AnyObject]],
+                                pacProxySettings.count > 0 {
+                                let proxy = pacProxySettings[0] as NSDictionary
+                                if let proxyHostName = proxy[kCFProxyHostNameKey] as? NSString as String?,
+                                    let proxyPort = proxy[kCFProxyPortNumberKey] as? NSInteger,
+                                    let proxyType = proxy[kCFProxyTypeKey] as? NSString {
+                                    
+                                    self.stream.setupSocksProxy(proxyType, settings: proxy)
+                                    self.httpProxyHost = proxyHostName
+                                    self.httpProxyPort = proxyPort
+                                    self.startProxyConnection(proxyHostName, proxyPort)
                                 }
                             }
                         }
-                        task.resume()
-                    }
-                } else {
-                    if let autoProxyUrl = proxySettings[(kCFNetworkProxiesProxyAutoConfigURLString as NSString)] as? String {
-                        if let pacURL = NSURL(string: autoProxyUrl) as? URL {
-                            
-                            let request = URLRequest(url:pacURL)
-                            let session = URLSession.shared
-                            let task = session.dataTask(with: request) {[weak self] (data, response, error) in
-                                if error == nil && data != nil {
-                                    if let script = String(data: data!, encoding: String.Encoding.utf8) {
-                                        if let settings = self?.fetchProxySettingFromPACScript(script) {
-                                            if let proxyType = settings[(kCFProxyTypeKey as NSString)] as? NSString {
-                                                self?.stream.setupSocksProxy(proxyType, settings: settings)
-                                                self?.httpProxyHost = settings[(kCFProxyHostNameKey as NSString)] as? String
-                                                self?.httpProxyPort = settings[(kCFProxyPortNumberKey as NSString)] as! NSInteger
-                                                if let proxyHost = self?.httpProxyHost, let proxyPort = self?.httpProxyPort {
-                                                    self?.startProxyConnection(proxyHost, proxyPort)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            task.resume()
-                        }
-                    }
+                        
+                    })
+                    
                 }
             }
-            
-            //
-            
             
             if proxyType == kCFProxyTypeHTTP || proxyType == kCFProxyTypeHTTPS {
                 // HTTP/HTTPS proxy
